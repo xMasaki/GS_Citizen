@@ -1,0 +1,51 @@
+# =====================================================================
+# AcessaCidade — Apache Airflow 2.10.5 (modo standalone) para a DAG
+# acessacidade_elt_pipeline (disciplina 02 — Big Data Architecture).
+#
+# Uso (a partir desta pasta: 02-Big-Data-Architecture/airflow):
+#   docker compose --env-file ../../.env -f docker-compose.airflow.yml up -d
+#   (sem .env na raiz:  docker compose -f docker-compose.airflow.yml up -d)
+# UI: http://127.0.0.1:8080  — usuário "admin"; a senha é gerada pelo Airflow e
+#   gravada em /opt/airflow/standalone_admin_password.txt dentro do container:
+#   docker compose -f docker-compose.airflow.yml exec airflow cat /opt/airflow/standalone_admin_password.txt
+#
+# O modo standalone (SQLite + SequentialExecutor) é para DEMONSTRAÇÃO/DESENVOLVIMENTO,
+# não para produção. Nenhum segredo fica neste arquivo: PIPELINE_TOKEN vem do .env.
+# =====================================================================
+name: acessacidade-airflow
+
+services:
+  airflow:
+    image: apache/airflow:2.10.5-python3.11
+    command: standalone
+    # Linux: exporte AIRFLOW_UID=$(id -u) para que os arquivos gerados em data/ sejam seus.
+    user: "${AIRFLOW_UID:-50000}:0"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: "America/Sao_Paulo"
+      AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "America/Sao_Paulo"
+      # Dependência extra do pipeline. pandas 2.1.4, httpx 0.27.0 e numpy 1.26.4 já vêm na
+      # imagem; duckdb 1.1.3 é a versão das constraints do Airflow 2.10.5 / Python 3.11.
+      _PIP_ADDITIONAL_REQUIREMENTS: "duckdb==1.1.3"
+      # Pacote acessacidade_pipeline (montado de ../src) e pasta de dados (montada de ../../data)
+      PYTHONPATH: /opt/airflow/src
+      PIPELINE_DATA_DIR: /opt/airflow/acessacidade_data
+      # API do AcessaCidade rodando na máquina hospedeira (uvicorn na porta 8000)
+      ACESSACIDADE_API_URL: "${ACESSACIDADE_API_URL_AIRFLOW:-http://host.docker.internal:8000}"
+      PIPELINE_TOKEN: "${PIPELINE_TOKEN:-}"
+    volumes:
+      - ../dags:/opt/airflow/dags
+      - ../src:/opt/airflow/src
+      - ../../data:/opt/airflow/acessacidade_data
+    ports:
+      - "127.0.0.1:8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
